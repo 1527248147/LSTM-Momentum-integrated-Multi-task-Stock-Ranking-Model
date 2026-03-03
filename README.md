@@ -4,7 +4,7 @@
 
 ## 📥 数据集下载
 
-- `alpha158+ricequant_finance+lgbm` 数据集
+- `alpha158+ricequant_finance` 数据集
 - 链接: https://pan.baidu.com/s/1yIGTYrIe21nmIMGytfFmeg?pwd=6h8a
 - 提取码: `6h8a`
 
