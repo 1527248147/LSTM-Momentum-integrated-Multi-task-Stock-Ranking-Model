@@ -1,0 +1,135 @@
+Core/
+│
+├── README.md                         # 完整流程说明与技术概览
+├── QUICKSTART.md                     # 快速开始指南（三步走）
+├── FILE_INDEX.md                     # 文件清单与依赖关系
+│
+├── label/                            # 阶段1: 标签生成
+│   └── label_mimstocr_labels.py      # 生成回归标签和动量分类标签
+│
+├── panel/                            # 阶段2: 数据面板构建
+│   ├── 0_add_row_present.py          # 添加 row_present 列
+│   ├── 0_add_row_present.bat         # 批处理快捷方式
+│   ├── 1_build_panel_memmap.py       # 构建 memmap 格式面板
+│   ├── 1_build_panel_memmap.bat      # 批处理快捷方式
+│   ├── 2_dataset_memmap.py           # PyTorch Dataset & DataLoader
+│   ├── 2_test_memmap_dataset.bat     # 测试数据加载
+│   ├── MEMMAP_USAGE_GUIDE.md         # memmap 使用指南
+│   └── MEMORY_SAFETY_GUIDE.md        # 内存安全指南
+│
+└── model_training/                   # 阶段3: 模型训练与评估
+    │
+    ├── 核心训练脚本
+    │   ├── 3_train_stage1.py         # Stage1 预训练（可选）
+    │   └── 4_train_stage2.py         # Stage2 主训练（CQB+LambdaRank+Gating）
+    │
+    ├── 模型与损失
+    │   ├── model_lstm_mtl.py         # LSTM多任务模型定义
+    │   └── loss_adaptivek_approxndcg.py  # ApproxNDCG 排序损失
+    │
+    ├── 辅助脚本
+    │   ├── 5_feature_selection.py    # 特征选择
+    │   ├── generate_report_from_checkpoint.py  # 测试报告生成
+    │   ├── comprehensive_report.py   # 综合报告辅助函数
+    │   └── run_refit_rolling_window_test.py  # 滚动窗口回测
+    │
+    ├── 批处理示例
+    │   ├── train_stage2_lambdarank_alpha158.bat  # 训练脚本示例
+    │   ├── generate_report.bat       # 报告生成示例
+    │   └── run_feature_selection.bat # 特征选择示例
+    │
+    └── 文档
+        ├── STAGE2_README.md          # Stage2 训练详细说明
+        ├── LAMBDARANK_README.md      # LambdaRank 原理与实现
+        ├── REPORT_GENERATION_README.md  # 报告生成指南
+        └── FEATURE_SELECTION.md      # 特征选择策略
+
+
+数据文件（不在 Core/ 中，需单独存储）
+=====================================
+
+项目根目录/
+│
+├── data/                             # 数据目录（建议）
+│   ├── raw_stock_data/               # 原始 Parquet 数据
+│   ├── labeled_data/                 # 带标签的数据
+│   └── labeled_with_present/         # 添加 row_present 后的数据
+│
+└── Core/
+    └── panel/
+        └── memmap_data/              # memmap 格式面板数据
+            ├── X_f16.mmap            # 特征矩阵 [T, N, D]
+            ├── y_ret_f32.mmap        # 回归标签 [T, N]
+            ├── y_mom_i8.mmap         # 分类标签 [T, N]
+            ├── ret_mask_u8.mmap      # 回归标签有效性
+            ├── mom_mask_u8.mmap      # 分类标签有效性
+            ├── both_mask_u8.mmap     # 双标签有效性
+            └── meta.json             # 元数据（日期、股票、特征名）
+
+训练输出（不在 Core/ 中）
+========================
+
+Core/model_training/runs/
+│
+└── experiment_name/
+    ├── best.pt                       # 最佳模型检查点
+    ├── config.json                   # 训练配置
+    ├── log.csv                       # 训练日志
+    └── comprehensive_report.json     # 测试报告
+
+
+技术要点
+========
+
+1. 标签生成 (label/)
+   - 次日收益率: label_ret_1d = (close_{t+1} - close_t) / close_t
+   - 20日动量分类: 将20日收益率分为5个等级 (0-4)
+   - 标签有效性: 过滤停牌、涨跌停、缺失数据
+
+2. 面板构建 (panel/)
+   - row_present 列: 标记当日数据存在性（避免t+1泄露）
+   - memmap 格式: 高效的大规模数据存储（避免OOM）
+   - X 结构: [features(F), isna(F), row_present(1)] = D=2F+1
+
+3. 模型训练 (model_training/)
+   - CQB: 自适应多任务平衡（β_n 根据 V_n 动态调整）
+   - LambdaRank: ΔNDCG@k 加权的成对排序损失
+   - Input Gating: 学习特征重要性，L1正则化促进稀疏性
+   - 早停: 基于 val RankIC（而非 loss）
+
+
+快速命令参考
+============
+
+# 1. 生成标签
+cd Core/label
+python label_mimstocr_labels.py --input_dir <数据路径> --output_dir <输出路径>
+
+# 2. 构建面板
+cd ../panel
+python 0_add_row_present.py --data_dir <标签数据> --output_dir <输出路径>
+python 1_build_panel_memmap.py --parquet_dir <上一步输出> --output_dir memmap_data
+
+# 3. 训练模型
+cd ../model_training
+python 4_train_stage2.py \
+    --dataset_py ../panel/2_dataset_memmap.py \
+    --memmap_dir ../panel/memmap_data \
+    --save_dir runs/exp1 \
+    --use_lambdarank --use_cqb --use_gating \
+    --exclude_features "^fund"
+
+# 4. 生成报告
+python generate_report_from_checkpoint.py \
+    --checkpoint runs/exp1/best.pt \
+    --dataset_py ../panel/2_dataset_memmap.py \
+    --memmap_dir ../panel/memmap_data
+
+
+更多信息
+========
+
+- 详细流程: 参见 README.md
+- 快速开始: 参见 QUICKSTART.md
+- 文件清单: 参见 FILE_INDEX.md
+- 技术文档: 参见 model_training/ 下的各 .md 文件
