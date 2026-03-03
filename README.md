@@ -228,14 +228,6 @@ python model_training/generate_report_from_checkpoint.py \
    - LambdaRank loss 需要 numerical clipping (score_diff, weights)
    - CQB 需要至少 2b=12 epochs 历史才启用
    - 早停基于 RankIC（而非 loss）
-
----
-
-## 📖 参考文献
-
-- 论文: *MiM-StocR: Momentum-integrated Multi-task Stock Recommendation* (arXiv:2509.10461v2)
-- 实现基于论文 Eq.(10)-(15), Eq.(21), 完全对应
-
 ---
 
 ## 🎯 快速开始
